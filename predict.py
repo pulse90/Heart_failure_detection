@@ -2,13 +2,12 @@ import os
 import joblib
 import warnings
 warnings.filterwarnings("ignore")
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import shap
 
-# ── Config ─────────────────────────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────
 
 MODEL_PATH  = "model.pkl"
 SCALER_PATH = "scaler.pkl"
