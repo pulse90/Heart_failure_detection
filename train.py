@@ -23,7 +23,7 @@ import shap
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-DATA_PATH   = "data/heart_failure_clinical_records.csv"
+DATA_PATH   = "data/heart_failure_clinical_records_dataset.csv"
 MODEL_PATH  = "model.pkl"
 SCALER_PATH = "scaler.pkl"
 RANDOM_STATE = 42

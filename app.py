@@ -17,11 +17,47 @@ st.set_page_config(
 # ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.risk-high   { background:#fdf2f2; border-left:4px solid #e74c3c; padding:16px 20px; border-radius:0 8px 8px 0; }
-.risk-medium { background:#fef9e7; border-left:4px solid #f39c12; padding:16px 20px; border-radius:0 8px 8px 0; }
-.risk-low    { background:#eafaf1; border-left:4px solid #27ae60; padding:16px 20px; border-radius:0 8px 8px 0; }
-.risk-title  { font-size:20px; font-weight:600; margin-bottom:4px; }
-.metric-note { font-size:12px; color:#888; margin-top:4px; }
+/* High Risk - Red */
+.risk-high { 
+    background: rgba(231, 76, 60, 0.15); 
+    border-left: 4px solid #e74c3c; 
+    padding: 16px 20px; 
+    border-radius: 0 8px 8px 0; 
+    color: #ff6b6b; /* Bright red for dark mode visibility */
+}
+
+/* Medium Risk - Orange/Yellow */
+.risk-medium { 
+    background: rgba(243, 156, 18, 0.15); 
+    border-left: 4px solid #f39c12; 
+    padding: 16px 20px; 
+    border-radius: 0 8px 8px 0; 
+    color: #fbc531; 
+}
+
+/* Low Risk - Green */
+.risk-low { 
+    background: rgba(39, 174, 96, 0.15); 
+    border-left: 4px solid #27ae60; 
+    padding: 16px 20px; 
+    border-radius: 0 8px 8px 0; 
+    color: #2ecc71; 
+}
+
+.risk-title { 
+    font-size: 20px; 
+    font-weight: 600; 
+    margin-bottom: 4px; 
+    /* This ensures title matches the alert color */
+    color: inherit; 
+}
+
+.metric-note { 
+    font-size: 13px; 
+    /* Using a silver that works on both white and near-black backgrounds */
+    color: #bdc3c7; 
+    margin-top: 8px; 
+}
 </style>
 """, unsafe_allow_html=True)
 
