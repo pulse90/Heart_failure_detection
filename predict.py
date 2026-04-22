@@ -102,66 +102,106 @@ def predict(patient_data: dict, model, scaler) -> dict:
 
 # ── SHAP Explanation ───────────────────────────────────────────────────────────
 
+def _extract_shap_1d(shap_values, expected_value):
+    """
+    Normalise SHAP output to a 1-D array of length n_features (class-1 slice)
+    and a scalar base value, regardless of what the explainer returned.
+
+    Handles all known shapes:
+        list of arrays  → pick index [1]
+        (n_features,)   → already 1-D
+        (1, n_features) → squeeze row 0
+        (1, n_features, 2) → squeeze row 0, pick class 1   ← your case
+        (n_features, 2)    → pick class 1
+    """
+    # ── resolve list output ──────────────────────────────────────────────────
+    if isinstance(shap_values, list):
+        # list[0] = class-0, list[1] = class-1
+        sv = np.array(shap_values[1])
+        ev = (expected_value[1]
+              if isinstance(expected_value, (list, np.ndarray))
+              else expected_value)
+    else:
+        sv = np.array(shap_values)
+        ev = (expected_value[1]
+              if isinstance(expected_value, (list, np.ndarray))
+              else expected_value)
+
+    # ── resolve ndim ─────────────────────────────────────────────────────────
+    if sv.ndim == 1:
+        # (n_features,)  — already done
+        shap_1d = sv
+
+    elif sv.ndim == 2:
+        if sv.shape[0] == 1:
+            # (1, n_features)
+            shap_1d = sv[0]
+        else:
+            # (n_features, 2)  — last axis is classes
+            shap_1d = sv[:, 1]
+
+    elif sv.ndim == 3:
+        # (n_samples, n_features, n_classes)  → row 0, class 1
+        shap_1d = sv[0, :, 1]
+
+    else:
+        raise ValueError(f"Unexpected SHAP shape: {sv.shape}")
+
+    return shap_1d, float(ev)
+
+
 def _get_explainer_and_shap(model, input_scaled_df):
     """
-    Auto-selects the correct SHAP explainer based on model type.
-    Returns (explainer, shap_values_1d) for the single input row.
-
-    Supports:
-      - TreeExplainer   : RandomForest, XGBoost, GradientBoosting, LightGBM
-      - LinearExplainer : LogisticRegression, LinearSVC, SGDClassifier
-      - KernelExplainer : any other model (slow fallback)
+    Returns:
+        explainer, shap_vals_1d (length = n_features), base_value
     """
     model_name = type(model).__name__
 
-    TREE_MODELS   = {"RandomForestClassifier", "XGBClassifier",
-                     "GradientBoostingClassifier", "LGBMClassifier",
-                     "ExtraTreesClassifier", "DecisionTreeClassifier"}
-    LINEAR_MODELS = {"LogisticRegression", "LinearSVC",
-                     "SGDClassifier", "RidgeClassifier"}
+    TREE_MODELS = {
+        "RandomForestClassifier", "XGBClassifier",
+        "GradientBoostingClassifier", "LGBMClassifier",
+        "ExtraTreesClassifier", "DecisionTreeClassifier",
+    }
 
+    LINEAR_MODELS = {
+        "LogisticRegression", "LinearSVC",
+        "SGDClassifier", "RidgeClassifier",
+    }
+
+    # ── TREE MODELS ──────────────────────────────────────────────────────────
     if model_name in TREE_MODELS:
         explainer   = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(input_scaled_df)
-        # RandomForest returns list [class0, class1] — take class 1
-        if isinstance(shap_values, list):
-            shap_values = shap_values[1]
-        base_value = (
-            explainer.expected_value[1]
-            if isinstance(explainer.expected_value, (list, np.ndarray))
-            else explainer.expected_value
-        )
+        shap_1d, base_value = _extract_shap_1d(shap_values, explainer.expected_value)
 
+    # ── LINEAR MODELS ────────────────────────────────────────────────────────
     elif model_name in LINEAR_MODELS:
-        # LinearExplainer needs a background dataset — use zero vector as neutral baseline
-        background  = pd.DataFrame(
-            np.zeros((1, len(FEATURES))), columns=FEATURES
+        background = pd.DataFrame(
+            np.zeros((1, input_scaled_df.shape[1])),
+            columns=input_scaled_df.columns,
         )
         explainer   = shap.LinearExplainer(model, background)
         shap_values = explainer.shap_values(input_scaled_df)
-        base_value  = (
-            explainer.expected_value[0]
-            if isinstance(explainer.expected_value, (list, np.ndarray))
-            else explainer.expected_value
-        )
+        shap_1d, base_value = _extract_shap_1d(shap_values, explainer.expected_value)
 
+    # ── FALLBACK (KERNEL) ────────────────────────────────────────────────────
     else:
-        # Universal fallback — works for any model, slower
-        background  = pd.DataFrame(
-            np.zeros((10, len(FEATURES))), columns=FEATURES
+        background = pd.DataFrame(
+            np.zeros((10, input_scaled_df.shape[1])),
+            columns=input_scaled_df.columns,
         )
         explainer   = shap.KernelExplainer(model.predict_proba, background)
-        shap_values = explainer.shap_values(input_scaled_df)[1]
-        base_value  = (
-            explainer.expected_value[1]
-            if isinstance(explainer.expected_value, (list, np.ndarray))
-            else explainer.expected_value
+        shap_values = explainer.shap_values(input_scaled_df)
+        shap_1d, base_value = _extract_shap_1d(shap_values, explainer.expected_value)
+
+    # ── Safety check ─────────────────────────────────────────────────────────
+    if shap_1d.shape[0] != input_scaled_df.shape[1]:
+        raise ValueError(
+            f"SHAP feature mismatch: got {shap_1d.shape[0]}, "
+            f"expected {input_scaled_df.shape[1]}"
         )
 
-    # Flatten to 1D array (single patient row)
-    shap_vals_1d = np.array(shap_values).flatten()
-
-    return explainer, shap_vals_1d, float(base_value)
+    return explainer, shap_1d, base_value
 
 
 def explain(result: dict, model) -> plt.Figure:
@@ -190,12 +230,25 @@ def explain(result: dict, model) -> plt.Figure:
         feature_names = [FEATURE_LABELS.get(f, f) for f in FEATURES],
     )
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    plt.figure(figsize=(7, 4))
     shap.plots.waterfall(shap_explanation, show=False, max_display=12)
-    plt.title("SHAP Feature Contributions for This Patient",
-              fontsize=12, fontweight="bold", pad=12)
-    plt.tight_layout()
 
+    ax = plt.gca()
+
+    # Symmetric x-axis so positive and negative bars scale equally
+    x_max = max(abs(shap_vals_1d.min()), abs(shap_vals_1d.max())) * 1.3
+    ax.set_xlim(-x_max, x_max)
+
+    # Light grid on the x-axis for readability
+    ax.xaxis.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    ax.set_axisbelow(True)
+
+    ax.set_title("SHAP Feature Contributions for This Patient",
+                 fontsize=10, fontweight="bold", pad=8)
+    ax.tick_params(axis="both", labelsize=7)
+
+    plt.tight_layout()
+    fig = plt.gcf()
     return fig
 
 
@@ -206,19 +259,14 @@ def get_feature_importance(model) -> pd.DataFrame:
     Returns a DataFrame of global feature importances sorted descending.
     Works for tree-based and linear models.
     """
-    model_name = type(model).__name__
-
     try:
         if hasattr(model, "feature_importances_"):
-            # Tree-based: RandomForest, XGBoost etc.
             importances = model.feature_importances_
 
         elif hasattr(model, "coef_"):
-            # Linear models: LogisticRegression etc.
             importances = np.abs(model.coef_[0])
 
         else:
-            # Unknown model — return uniform importances
             importances = np.ones(len(FEATURES)) / len(FEATURES)
 
         df = pd.DataFrame({
@@ -228,6 +276,5 @@ def get_feature_importance(model) -> pd.DataFrame:
 
         return df
 
-    except Exception as e:
-        # Return empty DataFrame on failure
+    except Exception:
         return pd.DataFrame({"Feature": FEATURES, "Importance": [0] * len(FEATURES)})
